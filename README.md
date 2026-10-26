@@ -4,13 +4,18 @@ This repo runs DeepSeek-V4.1-Flash-1017 on DGX Sparks (GB10). Each **lane** is o
 node count, launch scripts, and measured results. The current lanes run on [TensorFold](https://github.com/ashhart/TensorFold)'s native engine; the older
 vLLM lanes stay documented below them with their recipe, patches and benchmarks unchanged.
 
+> **2026-10-26: our fleet moved to [bertholomus's recipe v0.3.5](https://github.com/bertholomus/deepseek-v4.1-tensorfold-tp4-4xgb10)** (his engine `0a0b69a` and his
+> [EXL3 4.0 bpw pack](https://huggingface.co/bertholomus/DeepSeek-V4.1-Flash-1017-EXL3-4.0bpw)), run as published plus two small patches, both RoCE halves and a larger KV pool.
+> It is his work; [the section below](#tensorfold-tp4-recipe-v035-exl3-40-bpw-our-fleet-lane) lists what we changed and what it measured on our nodes. Our own 3.5 bpw lane stays as the rollback.
+
 > This repo was renamed from `DeepSeek-V4.1-Flash-vLLM-DGX-Spark` on 2026-10-21. Old links and clones redirect here.
 
 ## Lanes at a glance
 
 | lane | Sparks | engine and weights | status | headline numbers | start here |
 |---|---|---|---|---|---|
-| **TensorFold TP4 (default)** | 4 | TensorFold native (bertholomus TP4 fork), LibertAI EXL3 3.5 bpw | validated | 93.6 tok/s at 1 user, 270.8 at 16 users, 1M context, KV pool 2,097,152 as shipped and **16,777,216** on Sparks that run nothing else ([run](runs/2026-10-26-1017-tensorfold-max-pool/)), eval 97.1 | [section](#tensorfold-tp4-lane-default) · [run folder](runs/2026-10-17-1017-tensorfold/) |
+| **TensorFold TP4, recipe v0.3.5 + EXL3 4.0 bpw (our fleet since 2026-10-26)** | 4 | bertholomus's recipe v0.3.5 (engine `0a0b69a`) and his EXL3 4.0 bpw pack, plus two patches | validated | 97.2 tok/s at 1 user (code 143.7 per stream), 230.7 at 16, 93K prompt in 37 s, a short reply in about 2 s during a 131K read, KV pool **29,360,128** (our max), 600K needles | [section](#tensorfold-tp4-recipe-v035-exl3-40-bpw-our-fleet-lane) · [run folder](runs/2026-10-26-1017-tensorfold-v035-4bpw/) |
+| **TensorFold TP4, 3.5 bpw (our lane until 2026-10-26, rollback)** | 4 | TensorFold native (bertholomus TP4 fork), LibertAI EXL3 3.5 bpw | validated | 93.6 tok/s at 1 user, 270.8 at 16 users, 1M context, KV pool 2,097,152 as shipped and **16,777,216** on Sparks that run nothing else ([run](runs/2026-10-26-1017-tensorfold-max-pool/)), eval 97.1 | [section](#tensorfold-tp4-lane-35-bpw-rollback) · [run folder](runs/2026-10-17-1017-tensorfold/) |
 | **TensorFold TP4, uncensored** (live on our fleet) | 4 | the default lane + the Keys 1017 abliteration overlay | live since 2026-10-18 | same speed as the default lane; eval 87.0 (safety scenarios) | [section](#uncensored-variant-keys-1017-overlay) · [run folder](runs/2026-10-18-1017-tensorfold-uncensored/) |
 | **TensorFold TP2** | 2 | TensorFold native (bertholomus TP2 family), LibertAI EXL3 2.9 bpw | validated 2026-10-19 (our fleet endpoint is back on TP4) | 73.1 tok/s at 1 user, 135.8 at 4 users, 1M context (1M-token needle found), KV pool 1,048,576 positions, 93K prompt in 43.7 s, eval 97.1 | [section](#tensorfold-tp2-lane-two-sparks) · [run folder](runs/2026-10-18-1017-tensorfold-tp2/) |
 | vLLM, native 1017 weights | 4 | vLLM `dsv41-feat` + our patches, native FP8/FP4 | older, documented | 48.5 tok/s at 1 user, 165.7 at 6, eval 98.6 | [section](#deepseek-v41-flash-1017-on-4x-dgx-spark) · [run folder](runs/2026-10-17-1017/) |
@@ -37,7 +42,36 @@ published by Mia-AiLab; the uncensored variant adds drowzeys' (Keys) overlay. Th
 RoCEnante (local-inference-lab), cuda-exl3 and bot-lab-21's EXL3 build, plus fixes and reports from people running this recipe on their own Sparks.
 Everyone is listed in [Credits](#credits) and [CREDITS.md](CREDITS.md).
 
-## TensorFold TP4 lane (default)
+## TensorFold TP4, recipe v0.3.5, EXL3 4.0 bpw (our fleet lane)
+
+**This is bertholomus's lane.** The engine (his `deepseek-v41-zig-tp4` branch at `0a0b69a`), the weights
+([DeepSeek-V4.1-Flash-1017-EXL3-4.0bpw](https://huggingface.co/bertholomus/DeepSeek-V4.1-Flash-1017-EXL3-4.0bpw)), the kit, the chat template,
+the run-time inputs, `scripts/serve.sh` and the served settings all come from his recipe
+[deepseek-v4.1-tensorfold-tp4-4xgb10](https://github.com/bertholomus/deepseek-v4.1-tensorfold-tp4-4xgb10) (v0.3.5, Apache-2.0). Build it from his
+`RUNNING.md`. Our run folder, [`runs/2026-10-26-1017-tensorfold-v035-4bpw/`](runs/2026-10-26-1017-tensorfold-v035-4bpw/), holds only what we changed and what we measured:
+
+- **Two engine patches:** `TF_RDMA_GID` (our RoCE v2 GID index is 3) and the opt-in `TF_SEED_RANDOM` / `TF_TOP_K_MAX` server settings, the same changes as
+  our 3.5 bpw lane's `0003` and `0004`, re-exported on top of `0a0b69a`.
+- **Both halves of the RoCE link** (`RDMA_HCA` with both devices, as in step 5b of the 3.5 bpw lane's quick start).
+- **Our fleet flags:** thinking off by default, the `glm-5.3-flash` alias, temperature 1.0 / top_p 1.0 / top_k 20.
+- **A KV pool of 29,360,128 positions** instead of the recipe's 20,971,520.
+
+| measured on our four Sparks, 2026-10-26 | this lane | our 3.5 bpw lane (both rails) |
+|---|---|---|
+| aggregate tok/s, C1 / C6 / C16 | **97.2** / 195.5 / 230.7 | 93.6 / 213.8 / not run |
+| per-stream tok/s at C1 (coding) | **110.4 (143.7)** | 101.8 (143.5) |
+| cold prefill, 93,335 tokens | **2,550 tok/s (36.6 s)** | 2,215 tok/s (42.1 s) |
+| a short chat while a 131K prompt is read | **1.85-2.46 s** | waits for the whole read (the engine reads a prompt in one pass) |
+| KV pool | **29,360,128** positions | 2,097,152 shipped (16,777,216 measured) |
+| load | 26-27 s | about 107 s |
+| needles | 131K and 600K (x2) found | up to 500K |
+
+The pool: about 0.87 GiB per 1M positions on every node, allocated at load. At 29,360,128 the head node keeps 8.9 GiB free idle and 7.08 GiB at its
+lowest under a 600K-token prompt plus 16 streams plus the full bench; one step more would take it under 6 GiB, so that is where we stop. The recipe stops
+at 20,971,520 (a 9 GiB floor plus a 2 GiB margin); for nodes that run anything else, use its number. The tables, the pool steps and the checks are in the
+[run folder's README](runs/2026-10-26-1017-tensorfold-v035-4bpw/README.md).
+
+## TensorFold TP4 lane, 3.5 bpw (rollback)
 
 DeepSeek-V4.1-Flash-1017 on four Sparks, TensorFold native engine, LibertAI EXL3 3.5 bpw.
 
@@ -302,7 +336,7 @@ It loads on the first boot and answers correctly (count, code, tool call, image)
 | C1 / C6 aggregate tok/s | 48.5 / 165.7 | 36.0 / 115.8 |
 | draft tokens accepted (DSpark k=5) | 53 % | 12.4 % |
 
-Decode is 0.70-0.75x of the native lane. Where speculation helps little (prose, narrative, summary, math) EXL3 is within 0.8-1.3x of native; the loss is in the categories that benefit from DSpark, whose acceptance fell from 53 % to 12.4 %. The cause is not yet established; the run README lists the next tests. The 69-scenario eval was not run on this lane. The same pack served by TensorFold, the [default lane](#tensorfold-tp4-lane-default), benched at 89.8 and 202.9 tok/s aggregate at C1 and C6 on the same prompt set.
+Decode is 0.70-0.75x of the native lane. Where speculation helps little (prose, narrative, summary, math) EXL3 is within 0.8-1.3x of native; the loss is in the categories that benefit from DSpark, whose acceptance fell from 53 % to 12.4 %. The cause is not yet established; the run README lists the next tests. The 69-scenario eval was not run on this lane. The same pack served by TensorFold, the [default lane](#tensorfold-tp4-lane-35-bpw-rollback), benched at 89.8 and 202.9 tok/s aggregate at C1 and C6 on the same prompt set.
 
 ### Three Sparks: the EXL3 TP3 lane
 
@@ -595,6 +629,7 @@ In boot order. Details in `docs/`.
 | path | what |
 |---|---|
 | `runs/2026-10-17-1017-tensorfold/` | The default lane (TensorFold, TP4, LibertAI EXL3 3.5 bpw): `launch/config.env` (site settings for the recipe's `scripts/serve.sh`), the fleet configs and `launch/chat_template.jinja`; `patches/` (four engine patches, applied with `git am`); `tools/` (`v41bench_tf.py`, `long_check.py`, `inventory_pack.py`, `copy_engram.sh`, `test_chat_template.py`); `results/tf1017a/` (report, bench table, raw JSON and log). |
+| `runs/2026-10-26-1017-tensorfold-v035-4bpw/` | Our fleet lane since 2026-10-26: bertholomus's recipe v0.3.5 and EXL3 4.0 bpw pack, with our two patches, the fleet config and start script, the bench reports, the pool steps and the load checks. |
 | `runs/2026-10-26-1017-tensorfold-max-pool/` | The TP4 lane at a 16,777,216-position KV pool (8x the shipped 2,097,152): the config change, a start script for any pool size, the memory cost per pool size, and the kept-state check. |
 | `runs/2026-10-18-1017-tensorfold-uncensored/` | The uncensored variant of the TP4 lane: rank-cache patch tools, fleet config and start script, refusal probe, eval comparison. |
 | `runs/2026-10-18-1017-tensorfold-tp2/` | The TensorFold TP2 lane (two Sparks, LibertAI EXL3 2.9 bpw): build, per-node inputs, config, launch scripts and results. |
@@ -624,7 +659,8 @@ In boot order. Details in `docs/`.
 
 The full list, with links, licenses and what each piece is used for, is in [CREDITS.md](CREDITS.md). Third-party license and notice files are kept verbatim in [`third_party/`](third_party/).
 
-- Default lane:
+- Fleet lane since 2026-10-26: bertholomus, for the recipe [deepseek-v4.1-tensorfold-tp4-4xgb10](https://github.com/bertholomus/deepseek-v4.1-tensorfold-tp4-4xgb10) v0.3.5 (Apache-2.0), the engine branch it builds (`deepseek-v41-zig-tp4` at `0a0b69a`), its kernel kit and chat template, and the [EXL3 4.0 bpw pack of DeepSeek-V4.1-Flash-1017](https://huggingface.co/bertholomus/DeepSeek-V4.1-Flash-1017-EXL3-4.0bpw) (MIT); everyone his recipe credits.
+- 3.5 bpw lane (rollback):
   - [TensorFold](https://github.com/ashhart/TensorFold) (Apache-2.0), for the engine; bertholomus, for the DeepSeek-V4.1 TP4 fork ([`deepseek-v41-zig-tp4`](https://github.com/bertholomus/TensorFold)), the [recipe and kernel kit](https://github.com/bertholomus/deepseek-v4.1-tensorfold-tp4-4xgb10), and the Triton-variant fallback patch; Lucas Peters ([@lucas-peters](https://github.com/lucas-peters)), for the indexer alignment patch; ecohash-co, for the `TF_RDMA_GID` approach our third patch follows.
   - [LibertAI](https://huggingface.co/LibertAIDAI/DeepSeek-V4.1-Flash-1017-EXL3-3.5bpw), for the EXL3 3.5 bpw pack of DeepSeek-V4.1-Flash-1017 that the lane serves; [Mia-AiLab](https://huggingface.co/Mia-AiLab/DeepSeek-V4.1-Flash-EXL3-2.9bpw), for the DeepSeek-V4.1 EXL3 pack layout that the TensorFold engine reads and the LibertAI pack follows; turboderp, for ExLlamaV3 and the EXL3 format.
 - DeepSeek-AI, for DeepSeek-V4.1-Flash and the 1017 update (MIT), including the DSpark draft layers and `encoding.py`, the reference our chat template and encoded bench prompts follow.

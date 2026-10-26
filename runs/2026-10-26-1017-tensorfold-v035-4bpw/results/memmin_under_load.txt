@@ -1,0 +1,11 @@
+Lowest MemAvailable per node (GiB), sampled every 0.5 s by tools/memmin.sh
+
+pool 26,214,400 during a 600,000-token needle prompt + 16 streams x 3 replies (load16.py), 2026-10-26 21:47-21:53 UTC:
+  rank0 (Reddie) 9.87   rank1 11.94   rank2 11.91   rank3 11.99
+
+pool 29,360,128 during the same load, then the C1-C16 bench (tf4-v035-p29m), 2026-10-26 21:55-22:09 UTC:
+  rank0 (Reddie) 7.08   rank1 8.53   rank2 8.43   rank3 8.56
+
+Idle after load (no requests): pool 20,971,520 -> 15.6 / 17.1 / 17.1 / 17.1; 25,165,824 -> 12.3 / 13.7-13.8;
+26,214,400 -> 11.5 / 13.0-13.1; 29,360,128 -> 8.9 / 10.4-10.6.
+Rank 0 (the head node) also runs the API server and the 2 GiB prompt cache, so it is always the lowest.

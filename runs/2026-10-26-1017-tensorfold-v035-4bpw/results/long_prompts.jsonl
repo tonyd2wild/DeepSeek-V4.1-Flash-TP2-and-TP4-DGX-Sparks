@@ -1,0 +1,3 @@
+{"len": 131072, "http": 200, "prompt_tokens": 131072, "seconds": 54.7, "prefill_tok_s": 2398.0, "needle_ok": true, "reply": "2AXQYB26"}
+{"len": 600000, "http": 200, "prompt_tokens": 600000, "seconds": 338.5, "prefill_tok_s": 1772.0, "needle_ok": true, "reply": "NC9CEBAR"}
+{"len": 600000, "http": 200, "prompt_tokens": 600000, "seconds": 352.4, "prefill_tok_s": 1703.0, "needle_ok": true, "reply": "YXAS7EAS"}

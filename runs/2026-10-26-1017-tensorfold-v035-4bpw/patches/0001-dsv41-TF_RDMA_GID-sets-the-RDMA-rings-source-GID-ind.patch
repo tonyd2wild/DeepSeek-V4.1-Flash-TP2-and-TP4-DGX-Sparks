@@ -1,0 +1,70 @@
+From f314c94af899c10b2026fed529871cf9e2e05c24 Mon Sep 17 00:00:00 2001
+From: tonyd2wild-run <noreply@example.invalid>
+Date: Sat, 17 Oct 2026 22:43:51 -0400
+Subject: [PATCH 1/2] dsv41: TF_RDMA_GID sets the RDMA rings' source GID index
+ (default 5 unchanged)
+
+The index was fixed at 5 in model.zig (two rings) and layer_main.zig. On ports whose RoCE v2 IPv4 entry is another index
+(index 3 on the four-Spark cluster), the rings now read it from TF_RDMA_GID. The approach is the one ecohash-co
+described on ashhart/TensorFold#559.
+---
+ zig/src/families/dsv41/layer_main.zig | 2 +-
+ zig/src/families/dsv41/model.zig      | 4 ++--
+ zig/src/families/dsv41/rdma.zig       | 6 ++++++
+ 3 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/zig/src/families/dsv41/layer_main.zig b/zig/src/families/dsv41/layer_main.zig
+index e1479fef..dd187f4e 100644
+--- a/zig/src/families/dsv41/layer_main.zig
++++ b/zig/src/families/dsv41/layer_main.zig
+@@ -423,7 +423,7 @@ pub fn main(init: std.process.Init) !u8 {
+         var devices: std.ArrayList([]const u8) = .empty;
+         var dit = std.mem.splitScalar(u8, rdma_devices.?, ',');
+         while (dit.next()) |d| try devices.append(a, d);
+-        rdma_rings = try dsv41.ring2d.Rings.open(gpa, &driver, try dsv41.rdma.Kernels.load(rdma_mod.?), devices.items, rank, .{ .max_bytes = 4456448, .gid_index = 5 }, &comm, stream);
++        rdma_rings = try dsv41.ring2d.Rings.open(gpa, &driver, try dsv41.rdma.Kernels.load(rdma_mod.?), devices.items, rank, .{ .max_bytes = 4456448, .gid_index = dsv41.rdma.rdmaGid() }, &comm, stream);
+         two.?.rings = &rdma_rings.?;
+     }
+     var eng: prompt.Engine = .{ .d = &driver, .s = stream, .t = .{ .set = &set, .stream = stream }, .blas = undefined, .comm = &comm, .pf = &pf, .lin = &lg, .ex = &exk, .ops = &ops, .exact = &ex, .c = &cfg, .w = &w, .world = sp.world, .plain = rope, .compressed = rope_c, .two = if (two) |*t| t else null };
+diff --git a/zig/src/families/dsv41/model.zig b/zig/src/families/dsv41/model.zig
+index fc7b411b..b9c91ec9 100644
+--- a/zig/src/families/dsv41/model.zig
++++ b/zig/src/families/dsv41/model.zig
+@@ -354,7 +354,7 @@ pub const Model = struct {
+                 var devices: std.ArrayList([]const u8) = .empty;
+                 var dit = std.mem.splitScalar(u8, devs, ',');
+                 while (dit.next()) |x| try devices.append(a, x);
+-                m.rdma_rings = try ring2d.Rings.open(gpa, d, try rdma.Kernels.load(m.rdma_mod.?), devices.items, o.rank, .{ .max_bytes = ring_bytes, .gid_index = 5 }, &m.comm, m.stream);
++                m.rdma_rings = try ring2d.Rings.open(gpa, d, try rdma.Kernels.load(m.rdma_mod.?), devices.items, o.rank, .{ .max_bytes = ring_bytes, .gid_index = rdma.rdmaGid() }, &m.comm, m.stream);
+                 m.two.?.rings = &m.rdma_rings.?;
+             }
+         }
+@@ -513,7 +513,7 @@ pub const Model = struct {
+     /// connected, and started once both are (an all-gather as the barrier).
+     pub fn openRing(gpa: std.mem.Allocator, d: *const cuda.Driver, k: rdma.Kernels, devices: []const []const u8, rank: u32, comm: *const comm_mod.Comm, stream: cuda.Stream) !*rdma.Ring {
+         if (comm.world != 2) return error.NotTwoRanks;
+-        const r = try rdma.Ring.create(gpa, d, k, devices, rank, 2, .{ .max_bytes = ring_bytes, .gid_index = 5 });
++        const r = try rdma.Ring.create(gpa, d, k, devices, rank, 2, .{ .max_bytes = ring_bytes, .gid_index = rdma.rdmaGid() });
+         errdefer r.destroy(gpa);
+         const per = @sizeOf(rdma.Info);
+         const mine = [2]rdma.Info{ r.info(0), r.info(1) };
+diff --git a/zig/src/families/dsv41/rdma.zig b/zig/src/families/dsv41/rdma.zig
+index 73ff3ee6..a353b61d 100644
+--- a/zig/src/families/dsv41/rdma.zig
++++ b/zig/src/families/dsv41/rdma.zig
+@@ -28,6 +28,12 @@ const host_register_devicemap = 0x02;
+ 
+ pub const Error = error{ VerbsFailed, PostFailed, BadInfo, TooLarge, Failed, NoHostRegister } || cuda.Error || fabric.verbs.Error || std.posix.MMapError || std.Thread.SpawnError;
+ 
++/// TF_RDMA_GID: the RDMA rings' source GID index (the port's RoCE v2 IPv4 entry); 5 as served on the recipe authors' nodes.
++pub fn rdmaGid() u8 {
++    const v = std.c.getenv("TF_RDMA_GID") orelse return 5;
++    return std.fmt.parseInt(u8, std.mem.span(v), 10) catch 5;
++}
++
+ /// The Python build's switches, with their defaults (TF_RDMA_SLOTS, TF_RDMA_STAGE_BLOCKS, ..., TF_RDMA_PDL as served).
+ pub const Settings = struct {
+     slots: u32 = 4,
+-- 
+2.43.0
+
