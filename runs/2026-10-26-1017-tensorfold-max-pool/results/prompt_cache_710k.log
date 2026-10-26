@@ -1,0 +1,6 @@
+info: prompt cache: 710000 tokens, resumed at 0, kept 1; 3 states, 19 MiB and 0 MiB spare of 512 MiB (hits 0, misses 6, evicted 0, refused 0, failed 0)
+info: prompt cache: 710000 tokens, resumed at 0, kept 1; 4 states, 25 MiB and 0 MiB spare of 512 MiB (hits 0, misses 7, evicted 0, refused 0, failed 0)
+info: prompt cache: 710000 tokens, resumed at 0, kept 1; 5 states, 31 MiB and 0 MiB spare of 512 MiB (hits 0, misses 8, evicted 0, refused 0, failed 0)
+info: prompt cache: 710000 tokens, resumed at 708608, kept 0; 5 states, 31 MiB and 0 MiB spare of 512 MiB (hits 1, misses 8, evicted 0, refused 0, failed 0)
+info: prompt cache: 710000 tokens, resumed at 708608, kept 0; 5 states, 31 MiB and 0 MiB spare of 512 MiB (hits 2, misses 8, evicted 0, refused 0, failed 0)
+info: prompt cache: 710000 tokens, resumed at 708608, kept 0; 5 states, 31 MiB and 0 MiB spare of 512 MiB (hits 3, misses 8, evicted 0, refused 0, failed 0)

@@ -10,7 +10,7 @@ vLLM lanes stay documented below them with their recipe, patches and benchmarks 
 
 | lane | Sparks | engine and weights | status | headline numbers | start here |
 |---|---|---|---|---|---|
-| **TensorFold TP4 (default)** | 4 | TensorFold native (bertholomus TP4 fork), LibertAI EXL3 3.5 bpw | validated | 93.6 tok/s at 1 user, 270.8 at 16 users, 1M context, KV pool 2,097,152, eval 97.1 | [section](#tensorfold-tp4-lane-default) · [run folder](runs/2026-10-17-1017-tensorfold/) |
+| **TensorFold TP4 (default)** | 4 | TensorFold native (bertholomus TP4 fork), LibertAI EXL3 3.5 bpw | validated | 93.6 tok/s at 1 user, 270.8 at 16 users, 1M context, KV pool 2,097,152 as shipped and **16,777,216** on Sparks that run nothing else ([run](runs/2026-10-26-1017-tensorfold-max-pool/)), eval 97.1 | [section](#tensorfold-tp4-lane-default) · [run folder](runs/2026-10-17-1017-tensorfold/) |
 | **TensorFold TP4, uncensored** (live on our fleet) | 4 | the default lane + the Keys 1017 abliteration overlay | live since 2026-10-18 | same speed as the default lane; eval 87.0 (safety scenarios) | [section](#uncensored-variant-keys-1017-overlay) · [run folder](runs/2026-10-18-1017-tensorfold-uncensored/) |
 | **TensorFold TP2** | 2 | TensorFold native (bertholomus TP2 family), LibertAI EXL3 2.9 bpw | validated 2026-10-19 (our fleet endpoint is back on TP4) | 73.1 tok/s at 1 user, 135.8 at 4 users, 1M context (1M-token needle found), KV pool 1,048,576 positions, 93K prompt in 43.7 s, eval 97.1 | [section](#tensorfold-tp2-lane-two-sparks) · [run folder](runs/2026-10-18-1017-tensorfold-tp2/) |
 | vLLM, native 1017 weights | 4 | vLLM `dsv41-feat` + our patches, native FP8/FP4 | older, documented | 48.5 tok/s at 1 user, 165.7 at 6, eval 98.6 | [section](#deepseek-v41-flash-1017-on-4x-dgx-spark) · [run folder](runs/2026-10-17-1017/) |
@@ -55,6 +55,7 @@ Validated so far (details under [Status and pending checks](#status-and-pending-
   - `0004`: two opt-in server settings, `TF_SEED_RANDOM` (a random seed for requests that send none) and `TF_TOP_K_MAX` (`top_k <= 0` means the server default, larger values are clamped instead of returning an error) (ours; see "Sampling on the fleet endpoint" below).
 - **Kit:** the kernel kit from [bertholomus/deepseek-v4.1-tensorfold-tp4-4xgb10](https://github.com/bertholomus/deepseek-v4.1-tensorfold-tp4-4xgb10). It covers 3.5 bpw; no new kernels were built for this pack.
 - **Serving settings** ([`launch/config.env`](runs/2026-10-17-1017-tensorfold/launch/config.env)): TP4 over one RoCE rail (RoCE v2 GID index 3; the fleet endpoint uses both rails, step 5b of the quick start), `--context 1048576`, `--streams 16`, `--round-rows 48`, `--pool 2097152`, `--no-thinking --max-tokens 32768`, served name `deepseek-v4.1-flash`.
+- **KV pool:** 2,097,152 positions is what we ship, sized to leave room for a ComfyUI studio on every Spark. It is a setting, not a limit: on Sparks that run nothing else the same lane serves **16,777,216** (16 streams x 1,048,576, every stream at a full 1M context at once), at about 0.87 GiB per 1M positions on every node, allocated at load. Three values change (`WINDOW`, `TF_DS_WINDOW`, `--pool`); measurements and the start script are in [`runs/2026-10-26-1017-tensorfold-max-pool/`](runs/2026-10-26-1017-tensorfold-max-pool/). bertholomus's recipe reached the same place on his build (20,971,520 served, 16,777,216 for nodes that need more room).
 
 ### Results
 
@@ -185,6 +186,7 @@ The exact scripts we ran, with every setting, are in the run folder: [runs/2026-
 | item | state |
 |---|---|
 | Load on four ranks | done: about 107 s, 71.87 GiB of model per node |
+| KV pool at 16,777,216 (2026-10-26) | done ([run folder](runs/2026-10-26-1017-tensorfold-max-pool/)): 16 streams x 1,048,576 on the same engine and weights, about 0.87 GiB per 1M positions on every node, 27-29 GiB left per node; three 710,000-token conversations (2.13M positions) kept in the pool together and resumed from their kept states in 1.8 s each |
 | Bench C1-C6 and cold prefill (`tf1017a`, 2026-10-18 UTC) | done: ran to the end without error; tables above |
 | Chat template | done: [`launch/chat_template.jinja`](runs/2026-10-17-1017-tensorfold/launch/chat_template.jinja), written from DeepSeek's MIT `encoding.py`, byte-exact against the reference encoder on the official cases, 267 named cases, 8,000 random conversations, and 5,098 cases through TensorFold's own Jinja engine. Two small documented gaps in the run folder's STATUS.md |
 | Long prompts with a needle | done: 20,000; 131,073; 145,152; 146,421; 149,796; 160,000; 300,000 and 500,000 tokens all pass |
@@ -593,6 +595,7 @@ In boot order. Details in `docs/`.
 | path | what |
 |---|---|
 | `runs/2026-10-17-1017-tensorfold/` | The default lane (TensorFold, TP4, LibertAI EXL3 3.5 bpw): `launch/config.env` (site settings for the recipe's `scripts/serve.sh`), the fleet configs and `launch/chat_template.jinja`; `patches/` (four engine patches, applied with `git am`); `tools/` (`v41bench_tf.py`, `long_check.py`, `inventory_pack.py`, `copy_engram.sh`, `test_chat_template.py`); `results/tf1017a/` (report, bench table, raw JSON and log). |
+| `runs/2026-10-26-1017-tensorfold-max-pool/` | The TP4 lane at a 16,777,216-position KV pool (8x the shipped 2,097,152): the config change, a start script for any pool size, the memory cost per pool size, and the kept-state check. |
 | `runs/2026-10-18-1017-tensorfold-uncensored/` | The uncensored variant of the TP4 lane: rank-cache patch tools, fleet config and start script, refusal probe, eval comparison. |
 | `runs/2026-10-18-1017-tensorfold-tp2/` | The TensorFold TP2 lane (two Sparks, LibertAI EXL3 2.9 bpw): build, per-node inputs, config, launch scripts and results. |
 | `runs/` (other folders) | The vLLM lanes' run records: `2026-10-17-1017` (native 1017 weights, boots a-h, 69-scenario eval), `2026-10-17-1017-exl3` (full EXL3 on vLLM), `2026-09-19-speedrun2`, `2026-09-17-nvfp4`, `2026-09-14-speedrun`, `2026-09-14-sglang-lane`. |

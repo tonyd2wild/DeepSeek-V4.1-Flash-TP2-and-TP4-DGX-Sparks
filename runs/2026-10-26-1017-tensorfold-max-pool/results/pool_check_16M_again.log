@@ -1,0 +1,3 @@
+{"again": 0, "prompt_tokens": 710000, "cached": 708608, "seconds": 1.8, "needle_ok": true}
+{"again": 1, "prompt_tokens": 710000, "cached": 708608, "seconds": 1.7, "needle_ok": false}
+{"again": 2, "prompt_tokens": 710000, "cached": 708608, "seconds": 1.8, "needle_ok": true}
